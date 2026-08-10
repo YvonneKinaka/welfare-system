@@ -204,7 +204,7 @@ export async function getOrCreateCurrentMonthlyObligation(memberId: string) {
 }
 
 /** Marks any obligation (registration, annual renewal, or monthly) as paid. */
-export async function recordObligationPayment(obligationId: string, recordedById: string) {
+export async function recordObligationPayment(obligationId: string, recordedById: string | null) {
   return prisma.memberObligation.update({
     where: { id: obligationId },
     data: { status: "PAID", paidAt: new Date(), recordedById },

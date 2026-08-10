@@ -122,3 +122,17 @@ export const updateOrganizationSettingsSchema = z
     message: "Monthly due day is required for monthly contributions",
     path: ["monthlyDueDay"],
   });
+
+// Initiate a mock payment transaction against an obligation or welfare contribution.
+export const initiatePaymentSchema = z.object({
+  targetType: z.enum(["OBLIGATION", "WELFARE_CONTRIBUTION"]),
+  targetId: z.string().min(1),
+  phone: z.string().min(7, "Enter a valid phone number").optional(),
+});
+
+// Payment provider callback/webhook payload (mock shape for now).
+export const paymentCallbackSchema = z.object({
+  reference: z.string().min(1),
+  status: z.enum(["PROCESSING", "PAID", "FAILED"]),
+  providerTransactionId: z.string().optional(),
+});

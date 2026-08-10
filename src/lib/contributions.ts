@@ -138,7 +138,7 @@ export async function getCaseProgress(caseId: string) {
  * that clears all their outstanding contributions - if so and they were
  * suspended, they are automatically reactivated.
  */
-export async function recordPayment(opts: { caseId: string; memberId: string; recordedById: string }) {
+export async function recordPayment(opts: { caseId: string; memberId: string; recordedById: string | null }) {
   const contribution = await prisma.contribution.update({
     where: { caseId_memberId: { caseId: opts.caseId, memberId: opts.memberId } },
     data: { status: "PAID", paidAt: new Date(), recordedById: opts.recordedById },

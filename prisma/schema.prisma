@@ -110,7 +110,32 @@ model MemberObligation {
   recordedById String?
   createdAt    DateTime  @default(now())
 
+  transactions PaymentTransaction[]
+
   @@unique([memberId, type, periodLabel])
+}
+
+// Generic payment transaction, ready for a future real payment provider
+// integration (e.g. M-Pesa Daraja). Polymorphically links to exactly one
+// of: a MemberObligation (registration/annual/monthly) or a welfare
+// Contribution. No provider is connected yet - initiate() returns a mock
+// PENDING transaction, and the callback endpoint marks the linked
+// obligation/contribution PAID once a provider confirms payment.
+model PaymentTransaction {
+  id                    String    @id @default(cuid())
+  reference             String    @unique // our own reference, given to the (future) provider
+  amount                Int
+  phone                 String
+  status                String    @default("PENDING") // PaymentTransactionStatus: PENDING | PROCESSING | PAID | FAILED
+  providerTransactionId String? // populated once a real provider callback exists
+
+  obligationId   String?
+  obligation     MemberObligation? @relation(fields: [obligationId], references: [id])
+  contributionId String?
+  contribution   Contribution?     @relation(fields: [contributionId], references: [id])
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
 }
 
 model Beneficiary {
@@ -158,6 +183,8 @@ model Contribution {
   recordedById String?
   recordedBy   Admin?           @relation(fields: [recordedById], references: [id])
   createdAt    DateTime         @default(now())
+
+  transactions PaymentTransaction[]
 
   @@unique([caseId, memberId])
 }

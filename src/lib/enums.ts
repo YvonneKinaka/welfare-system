@@ -53,6 +53,23 @@ export const ObligationStatus = {
 } as const;
 export type ObligationStatus = (typeof ObligationStatus)[keyof typeof ObligationStatus];
 
+// What a PaymentTransaction is paying for - a MemberObligation row
+// (registration/annual/monthly) or a welfare Contribution row.
+export const PaymentTargetType = {
+  OBLIGATION: "OBLIGATION",
+  WELFARE_CONTRIBUTION: "WELFARE_CONTRIBUTION",
+} as const;
+export type PaymentTargetType = (typeof PaymentTargetType)[keyof typeof PaymentTargetType];
+
+export const PaymentTransactionStatus = {
+  PENDING: "PENDING",
+  PROCESSING: "PROCESSING",
+  PAID: "PAID",
+  FAILED: "FAILED",
+} as const;
+export type PaymentTransactionStatus =
+  (typeof PaymentTransactionStatus)[keyof typeof PaymentTransactionStatus];
+
 export const BeneficiaryStatus = {
   PENDING_APPROVAL: "PENDING_APPROVAL",
   ACTIVE: "ACTIVE",
