@@ -1,0 +1,191 @@
+// Church Welfare Management System - Database Schema
+// Using SQLite for zero-config local development.
+// Swap the datasource to postgresql/mysql for production - models are portable.
+//
+// NOTE ON ENUMS: SQLite's Prisma connector does not support native `enum`
+// types (P1012). Every field that would otherwise be an enum is stored as a
+// plain String column holding one of a fixed set of values instead. Those
+// value sets are defined once in src/lib/enums.ts and used everywhere in the
+// app for type safety - the database itself just stores the string.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id             String   @id @default(cuid())
+  name           String
+  memberIdPrefix String   @default("MEM") // e.g. "RGC" -> RGC-000001
+  memberSequence Int      @default(0) // last-used sequence number for this org
+  createdAt      DateTime @default(now())
+
+  admins   Admin[]
+  members  Member[]
+  settings OrganizationSettings?
+}
+
+// Organization-wide payment configuration. Two independent models:
+// registration (compulsory - every org must pick ONE_TIME or ANNUAL) and
+// contribution (MONTHLY recurring, or PER_WELFARE_CASE which keeps the
+// existing ContributionCase/Contribution flow as the only obligation).
+model OrganizationSettings {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  // Membership / Registration Settings - compulsory, no "no fee" option.
+  registrationMode          String // RegistrationMode: ONE_TIME | ANNUAL
+  registrationAmount        Int
+  registrationCurrency      String    @default("KES")
+  registrationInstructions  String?
+  registrationEffectiveDate DateTime?
+  renewalMonth              Int? // 1-12, only used when registrationMode = ANNUAL
+  registrationGraceDays     Int       @default(0)
+
+  // Contribution Settings - separate from registration.
+  contributionMode   String @default("PER_WELFARE_CASE") // ContributionMode: MONTHLY | PER_WELFARE_CASE
+  monthlyAmount      Int?
+  monthlyDueDay      Int? // day of month, 1-31
+  monthlyGraceDays   Int?   @default(0)
+  reminderDaysBefore Int?   @default(3)
+
+  updatedAt DateTime @updatedAt
+}
+
+model Admin {
+  id             String   @id @default(cuid())
+  fullName       String
+  email          String   @unique
+  passwordHash   String
+  role           String   @default("ORG_ADMIN") // AdminRole: SUPER_ADMIN | ORG_ADMIN
+  status         String   @default("ACTIVE") // AdminStatus: ACTIVE | SUSPENDED
+  organizationId String? // null for SUPER_ADMIN; required in practice for ORG_ADMIN
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime @default(now())
+
+  contributionsRecorded Contribution[]
+  casesCreated          ContributionCase[]
+}
+
+model Member {
+  id               String   @id @default(cuid())
+  membershipNumber String   @unique
+  fullName         String
+  phone            String   @unique
+  email            String?  @unique
+  status           String   @default("ACTIVE") // MemberStatus: ACTIVE | SUSPENDED
+  missedCount      Int      @default(0)
+  organizationId   String? // nullable for backward compatibility with pre-multi-org data
+  organization     Organization? @relation(fields: [organizationId], references: [id])
+  dateJoined       DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  beneficiaries   Beneficiary[]
+  affectedInCases ContributionCase[] @relation("AffectedMember")
+  contributions   Contribution[]
+  obligations     MemberObligation[]
+}
+
+// Unified record for the two org-configured payment models - REGISTRATION
+// (one-time), ANNUAL_RENEWAL (one row per renewal period), and
+// MONTHLY_CONTRIBUTION (one row per calendar month). Entirely separate from
+// the existing welfare ContributionCase/Contribution system, which keeps
+// working exactly as before regardless of these settings.
+model MemberObligation {
+  id           String    @id @default(cuid())
+  memberId     String
+  member       Member    @relation(fields: [memberId], references: [id])
+  type         String // ObligationType: REGISTRATION | ANNUAL_RENEWAL | MONTHLY_CONTRIBUTION
+  periodLabel  String? // null for REGISTRATION; "2026" for ANNUAL_RENEWAL; "2026-08" for MONTHLY_CONTRIBUTION
+  amount       Int
+  dueDate      DateTime?
+  status       String    @default("PENDING") // ObligationStatus: PENDING | PAID | OVERDUE
+  paidAt       DateTime?
+  recordedById String?
+  createdAt    DateTime  @default(now())
+
+  @@unique([memberId, type, periodLabel])
+}
+
+model Beneficiary {
+  id           String   @id @default(cuid())
+  memberId     String
+  member       Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  fullName     String
+  relationship String
+  phone        String? // collected when a member self-submits a beneficiary
+  status       String   @default("ACTIVE") // BeneficiaryStatus: PENDING_APPROVAL | ACTIVE | REJECTED | ARCHIVED
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cases ContributionCase[]
+}
+
+model ContributionCase {
+  id               String      @id @default(cuid())
+  beneficiaryId    String
+  beneficiary      Beneficiary @relation(fields: [beneficiaryId], references: [id])
+  affectedMemberId String
+  affectedMember   Member      @relation("AffectedMember", fields: [affectedMemberId], references: [id])
+  amountPerMember  Int         @default(300) // fixed contribution, KSh, never editable
+  deadline         DateTime
+  status           String      @default("OPEN") // CaseStatus: OPEN | CLOSED
+  createdById      String
+  createdBy        Admin       @relation(fields: [createdById], references: [id])
+  createdAt        DateTime    @default(now())
+  closedAt         DateTime?
+  notes            String?
+
+  contributions Contribution[]
+}
+
+// One row per eligible member per case - created when the case opens.
+model Contribution {
+  id           String           @id @default(cuid())
+  caseId       String
+  case         ContributionCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  memberId     String
+  member       Member           @relation(fields: [memberId], references: [id])
+  amount       Int              @default(300)
+  status       String           @default("PENDING") // PaymentStatus: PENDING | PAID | LAPSED | WAIVED
+  paidAt       DateTime?
+  recordedById String?
+  recordedBy   Admin?           @relation(fields: [recordedById], references: [id])
+  createdAt    DateTime         @default(now())
+
+  @@unique([caseId, memberId])
+}
+
+model OtpCode {
+  id         String   @id @default(cuid())
+  identifier String // email or phone the code was issued to
+  purpose    String // OtpPurpose: ADMIN_LOGIN | MEMBER_LOGIN
+  codeHash   String
+  expiresAt  DateTime
+  consumed   Boolean  @default(false)
+  attempts   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([identifier, purpose])
+}
+
+// Notification placeholders - no real SMS/Email provider wired up yet.
+// Swap ConsoleNotificationProvider for a real provider later without
+// touching any calling code (see src/lib/notifications.ts).
+model Notification {
+  id            String    @id @default(cuid())
+  recipientType String // RecipientType: ADMIN | MEMBER
+  recipientId   String
+  channel       String // NotificationChannel: EMAIL | SMS
+  type          String // e.g. "OTP", "CASE_OPENED", "DEADLINE_REMINDER", "SUSPENSION"
+  payload       String // JSON string
+  status        String    @default("PENDING") // NotificationStatus: PENDING | SENT | FAILED
+  createdAt     DateTime  @default(now())
+  sentAt        DateTime?
+}
