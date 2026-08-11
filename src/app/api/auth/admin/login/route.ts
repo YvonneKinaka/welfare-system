@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { devCode } = await issueOtp({
+  const { devCode, delivered, deliveryError } = await issueOtp({
     identifier: admin.email,
     purpose: "ADMIN_LOGIN",
     recipientType: "ADMIN",
@@ -36,5 +36,5 @@ export async function POST(req: NextRequest) {
     displayName: admin.fullName,
   });
 
-  return NextResponse.json({ ok: true, identifier: admin.email, devCode });
+  return NextResponse.json({ ok: true, identifier: admin.email, devCode, delivered, deliveryError });
 }

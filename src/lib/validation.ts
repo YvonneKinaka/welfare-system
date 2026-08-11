@@ -136,3 +136,9 @@ export const paymentCallbackSchema = z.object({
   status: z.enum(["PROCESSING", "PAID", "FAILED"]),
   providerTransactionId: z.string().optional(),
 });
+
+// Resend an admin login OTP (re-uses the identifier from the initial
+// email+password step, does not require re-entering the password).
+export const resendAdminOtpSchema = z.object({
+  identifier: z.string().email(),
+});

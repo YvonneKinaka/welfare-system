@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/db";
 import { recordPayment as recordWelfareContributionPayment } from "@/lib/contributions";
 import { recordObligationPayment } from "@/lib/organizationBilling";
+import { dispatchNotification } from "@/lib/notifications";
 
 /**
  * PAYMENT TRANSACTIONS
@@ -76,7 +77,7 @@ export async function handlePaymentCallback(opts: {
 
   if (opts.status === "PAID") {
     if (updated.obligationId) {
-      await recordObligationPayment(updated.obligationId, null);
+      await recordObligationPayment(updated.obligationId, null, updated.reference);
     } else if (updated.contributionId) {
       const contribution = await prisma.contribution.findUniqueOrThrow({
         where: { id: updated.contributionId },
@@ -85,6 +86,28 @@ export async function handlePaymentCallback(opts: {
         caseId: contribution.caseId,
         memberId: contribution.memberId,
         recordedById: null,
+        paymentReference: updated.reference,
+      });
+    }
+  } else if (opts.status === "FAILED") {
+    const member = updated.obligationId
+      ? (await prisma.memberObligation.findUnique({ where: { id: updated.obligationId }, include: { member: true } }))
+          ?.member
+      : updated.contributionId
+        ? (await prisma.contribution.findUnique({ where: { id: updated.contributionId }, include: { member: true } }))
+            ?.member
+        : null;
+
+    if (member) {
+      await dispatchNotification({
+        recipientType: "MEMBER",
+        recipientId: member.id,
+        channel: member.email ? "EMAIL" : "SMS",
+        type: "PAYMENT_FAILED",
+        to: member.email ?? member.phone,
+        subject: "Payment failed",
+        message: `Your payment of KSh ${updated.amount} could not be completed.`,
+        paymentReference: updated.reference,
       });
     }
   }

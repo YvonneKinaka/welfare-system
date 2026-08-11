@@ -10,10 +10,13 @@ export default function AdminVerifyPage() {
   const router = useRouter();
   const params = useSearchParams();
   const identifier = params.get("identifier") ?? "";
-  const devCode = params.get("devCode");
+  const [devCode, setDevCode] = useState(params.get("devCode"));
+  const [delivered, setDelivered] = useState(params.get("delivered") !== "false");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendMsg, setResendMsg] = useState("");
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -31,6 +34,26 @@ export default function AdminVerifyPage() {
       return;
     }
     router.push(data.adminRole === "SUPER_ADMIN" ? "/super-admin/dashboard" : "/admin/dashboard");
+  }
+
+  async function onResend() {
+    setResending(true);
+    setResendMsg("");
+    setError("");
+    const res = await fetch("/api/auth/admin/resend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier }),
+    });
+    const data = await res.json();
+    setResending(false);
+    if (!res.ok) {
+      setError(data.error ?? "Could not resend the code.");
+      return;
+    }
+    setDevCode(data.devCode ?? null);
+    setDelivered(Boolean(data.delivered));
+    setResendMsg("A new code was requested.");
   }
 
   return (
@@ -52,6 +75,13 @@ export default function AdminVerifyPage() {
         </div>
       )}
 
+      {!devCode && !delivered && (
+        <div className="mb-6 rounded-2xl border border-danger-border bg-danger-bg px-4 py-3 text-sm text-danger-text">
+          We couldn't send your verification code — email delivery isn't configured yet. Contact
+          support to sign in.
+        </div>
+      )}
+
       <form onSubmit={onSubmit} className="space-y-4">
         <Input
           label="Email Verification Code"
@@ -66,13 +96,24 @@ export default function AdminVerifyPage() {
         <Button type="submit" disabled={loading} className="w-full">
           {loading ? "Verifying…" : "Verify"}
         </Button>
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="w-full text-center text-sm text-body font-medium"
-        >
-          Back
-        </button>
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="text-sm text-body font-medium"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={onResend}
+            disabled={resending}
+            className="text-sm font-semibold text-brand-600 disabled:opacity-60"
+          >
+            {resending ? "Resending…" : "Resend code"}
+          </button>
+        </div>
+        {resendMsg && <p className="text-sm text-brand-600 text-center">{resendMsg}</p>}
       </form>
     </AuthSplitLayout>
   );

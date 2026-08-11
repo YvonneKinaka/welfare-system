@@ -31,6 +31,7 @@ export default function AdminLoginPage() {
     }
     const params = new URLSearchParams({ identifier: data.identifier });
     if (data.devCode) params.set("devCode", data.devCode);
+    params.set("delivered", String(Boolean(data.delivered)));
     router.push(`/login/admin/verify?${params.toString()}`);
   }
 

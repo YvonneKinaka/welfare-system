@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
   const channel = identifier.includes("@") ? "EMAIL" : "SMS";
   const contact = channel === "EMAIL" ? member.email! : member.phone;
 
-  const { devCode } = await issueOtp({
+  const { devCode, delivered, deliveryError } = await issueOtp({
     identifier: contact,
     purpose: "MEMBER_LOGIN",
     recipientType: "MEMBER",
@@ -41,5 +41,5 @@ export async function POST(req: NextRequest) {
     displayName: member.fullName,
   });
 
-  return NextResponse.json({ ok: true, identifier: contact, devCode });
+  return NextResponse.json({ ok: true, identifier: contact, devCode, delivered, deliveryError });
 }

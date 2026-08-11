@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { dispatchNotification } from "@/lib/notifications";
 
 /**
  * Organization payment configuration + member payment obligations.
@@ -128,6 +129,8 @@ export async function getOrCreateRegistrationObligation(memberId: string) {
   if (!member.organizationId) return null;
 
   const settings = await getOrganizationSettings(member.organizationId);
+  const contact = member.email ?? member.phone;
+  const channel = member.email ? "EMAIL" : "SMS";
 
   if (settings.registrationMode === "ONE_TIME") {
     const existing = await prisma.memberObligation.findFirst({
@@ -135,7 +138,7 @@ export async function getOrCreateRegistrationObligation(memberId: string) {
     });
     if (existing) return existing;
 
-    return prisma.memberObligation.create({
+    const obligation = await prisma.memberObligation.create({
       data: {
         memberId,
         type: "REGISTRATION",
@@ -144,6 +147,18 @@ export async function getOrCreateRegistrationObligation(memberId: string) {
         dueDate: settings.registrationEffectiveDate,
       },
     });
+
+    await dispatchNotification({
+      recipientType: "MEMBER",
+      recipientId: memberId,
+      channel,
+      type: "REGISTRATION_DUE",
+      to: contact,
+      subject: "Registration payment due",
+      message: `Your one-time registration fee of ${settings.registrationCurrency} ${settings.registrationAmount} is due.`,
+    });
+
+    return obligation;
   }
 
   // ANNUAL
@@ -153,7 +168,7 @@ export async function getOrCreateRegistrationObligation(memberId: string) {
   });
   if (existing) return existing;
 
-  return prisma.memberObligation.create({
+  const obligation = await prisma.memberObligation.create({
     data: {
       memberId,
       type: "ANNUAL_RENEWAL",
@@ -162,6 +177,18 @@ export async function getOrCreateRegistrationObligation(memberId: string) {
       dueDate: renewalDueDate(settings.renewalMonth),
     },
   });
+
+  await dispatchNotification({
+    recipientType: "MEMBER",
+    recipientId: memberId,
+    channel,
+    type: "ANNUAL_RENEWAL_DUE",
+    to: contact,
+    subject: "Annual membership renewal due",
+    message: `Your annual membership renewal of ${settings.registrationCurrency} ${settings.registrationAmount} for ${periodLabel} is due.`,
+  });
+
+  return obligation;
 }
 
 function currentMonthLabel(): string {
@@ -192,7 +219,7 @@ export async function getOrCreateCurrentMonthlyObligation(memberId: string) {
   const dueDay = settings.monthlyDueDay ?? 1;
   const dueDate = new Date(now.getFullYear(), now.getMonth(), dueDay);
 
-  return prisma.memberObligation.create({
+  const obligation = await prisma.memberObligation.create({
     data: {
       memberId,
       type: "MONTHLY_CONTRIBUTION",
@@ -201,12 +228,42 @@ export async function getOrCreateCurrentMonthlyObligation(memberId: string) {
       dueDate,
     },
   });
+
+  await dispatchNotification({
+    recipientType: "MEMBER",
+    recipientId: memberId,
+    channel: member.email ? "EMAIL" : "SMS",
+    type: "MONTHLY_CONTRIBUTION_DUE",
+    to: member.email ?? member.phone,
+    subject: "Monthly contribution due",
+    message: `Your monthly contribution of KSh ${settings.monthlyAmount ?? 0} for ${periodLabel} is due on ${dueDate.toDateString()}.`,
+  });
+
+  return obligation;
 }
 
 /** Marks any obligation (registration, annual renewal, or monthly) as paid. */
-export async function recordObligationPayment(obligationId: string, recordedById: string | null) {
-  return prisma.memberObligation.update({
+export async function recordObligationPayment(
+  obligationId: string,
+  recordedById: string | null,
+  paymentReference?: string
+) {
+  const obligation = await prisma.memberObligation.update({
     where: { id: obligationId },
     data: { status: "PAID", paidAt: new Date(), recordedById },
+    include: { member: true },
   });
+
+  await dispatchNotification({
+    recipientType: "MEMBER",
+    recipientId: obligation.memberId,
+    channel: obligation.member.email ? "EMAIL" : "SMS",
+    type: "PAYMENT_SUCCESSFUL",
+    to: obligation.member.email ?? obligation.member.phone,
+    subject: "Payment received",
+    message: `Your payment of KSh ${obligation.amount} (${obligation.type.replace(/_/g, " ").toLowerCase()}) has been recorded as paid.`,
+    paymentReference,
+  });
+
+  return obligation;
 }

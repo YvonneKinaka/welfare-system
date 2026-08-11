@@ -30,6 +30,7 @@ export default function MemberLoginPage() {
     }
     const p = new URLSearchParams({ identifier: data.identifier });
     if (data.devCode) p.set("devCode", data.devCode);
+    p.set("delivered", String(Boolean(data.delivered)));
     router.push(`/login/member/verify?${p.toString()}`);
   }
 

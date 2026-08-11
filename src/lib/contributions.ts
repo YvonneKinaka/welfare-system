@@ -138,10 +138,27 @@ export async function getCaseProgress(caseId: string) {
  * that clears all their outstanding contributions - if so and they were
  * suspended, they are automatically reactivated.
  */
-export async function recordPayment(opts: { caseId: string; memberId: string; recordedById: string | null }) {
+export async function recordPayment(opts: {
+  caseId: string;
+  memberId: string;
+  recordedById: string | null;
+  paymentReference?: string;
+}) {
   const contribution = await prisma.contribution.update({
     where: { caseId_memberId: { caseId: opts.caseId, memberId: opts.memberId } },
     data: { status: "PAID", paidAt: new Date(), recordedById: opts.recordedById },
+    include: { member: true, case: { include: { beneficiary: true } } },
+  });
+
+  await dispatchNotification({
+    recipientType: "MEMBER",
+    recipientId: contribution.memberId,
+    channel: contribution.member.email ? "EMAIL" : "SMS",
+    type: "PAYMENT_SUCCESSFUL",
+    to: contribution.member.email ?? contribution.member.phone,
+    subject: "Welfare contribution received",
+    message: `Your KSh ${contribution.amount} welfare contribution for ${contribution.case.beneficiary.fullName} has been recorded as paid.`,
+    paymentReference: opts.paymentReference,
   });
 
   await maybeReactivateMember(opts.memberId);
@@ -169,6 +186,16 @@ export async function sweepOverdueContributions() {
     await prisma.contribution.update({
       where: { id: contribution.id },
       data: { status: "LAPSED" },
+    });
+
+    await dispatchNotification({
+      recipientType: "MEMBER",
+      recipientId: contribution.memberId,
+      channel: contribution.member.email ? "EMAIL" : "SMS",
+      type: "WELFARE_CONTRIBUTION_REMINDER",
+      to: contribution.member.email ?? contribution.member.phone,
+      subject: "Welfare contribution overdue",
+      message: `Your KSh ${contribution.amount} welfare contribution for ${contribution.case.beneficiary.fullName} is now overdue.`,
     });
 
     const updatedMember = await prisma.member.update({

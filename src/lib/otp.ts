@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import bcrypt from "bcryptjs";
-import { dispatchNotification } from "@/lib/notifications";
+import { sendEmailOtp, sendSmsOtp } from "@/lib/notifications";
 import type { OtpPurpose, RecipientType, NotificationChannel } from "@/lib/enums";
 
 const OTP_LENGTH = 6;
@@ -34,19 +34,29 @@ export async function issueOtp(opts: {
     },
   });
 
-  await dispatchNotification({
+  // Real delivery attempt through the provider-ready notification layer.
+  // No SMS/Email provider is connected yet, so this honestly comes back
+  // as { success: false, error } - it is never treated as a success.
+  const sendOpts = {
+    to: opts.identifier,
+    code,
+    displayName: opts.displayName,
     recipientType: opts.recipientType,
     recipientId: opts.recipientId,
-    channel: opts.channel,
-    type: "OTP",
-    to: opts.identifier,
-    subject: "Your Church Welfare login code",
-    message: `Hi ${opts.displayName}, your one-time login code is ${code}. It expires in ${OTP_TTL_MINUTES} minutes.`,
-  });
+    ttlMinutes: OTP_TTL_MINUTES,
+  };
+  const delivery = opts.channel === "EMAIL" ? await sendEmailOtp(sendOpts) : await sendSmsOtp(sendOpts);
 
-  // In development, we return the code so you can test the flow without a
-  // real inbox/SMS. This return value is ignored by the caller in production.
-  return { devCode: process.env.NODE_ENV !== "production" ? code : undefined, expiresAt };
+  // In development, we also return the code directly so the flow can be
+  // tested without a real inbox/SMS. This is a documented dev-only aid,
+  // separate from (and never a substitute for) the real delivery result
+  // above - it is never shown as if it were a successful delivery.
+  return {
+    devCode: process.env.NODE_ENV !== "production" ? code : undefined,
+    expiresAt,
+    delivered: delivery.success,
+    deliveryError: delivery.error,
+  };
 }
 
 export async function verifyOtp(opts: { identifier: string; purpose: OtpPurpose; code: string }) {
