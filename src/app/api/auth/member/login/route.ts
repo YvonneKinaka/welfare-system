@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { issueOtp } from "@/lib/otp";
+import { tamashaLogin, memberGuardName, tamashaEstateId } from "@/lib/tamashaClient";
+import { setPendingMemberAuth } from "@/lib/auth";
 import { memberLoginSchema } from "@/lib/validation";
 
+/**
+ * Member authentication via Tamasha - completely separate from the admin
+ * flow (src/app/api/auth/admin/login/route.ts, untouched). Same overall
+ * shape (Tamasha verifies credentials -> Tamasha sends OTP -> local Member
+ * lookup happens at verify time for portal access), but its own guard
+ * ("welfare"), its own pending-auth cookie, and its own local-lookup rule.
+ *
+ * Local Member existence is intentionally NOT checked here - it's checked
+ * at verify time (see verify/route.ts) and is blocking there, unlike the
+ * admin flow. Every member-portal page/API queries by a real Member.id,
+ * so a session without one would just crash pages rather than degrade
+ * gracefully - this app does not auto-create Member records from Tamasha
+ * (out of scope: "do not implement member creation").
+ */
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const parsed = memberLoginSchema.safeParse(body);
@@ -10,36 +24,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
   }
 
-  const { identifier } = parsed.data;
-  const member = await prisma.member.findFirst({
-    where: { OR: [{ phone: identifier }, { email: identifier }] },
-  });
+  const { identifier, password } = parsed.data;
 
-  if (!member) {
-    return NextResponse.json(
-      { error: "We couldn't find a member with that phone number or email." },
-      { status: 404 }
-    );
+  const result = await tamashaLogin(identifier, password, {
+    guard: memberGuardName(),
+    estateId: tamashaEstateId(),
+  });
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: 401 });
   }
 
-  if (member.status === "SUSPENDED") {
-    return NextResponse.json(
-      { error: "Your membership is currently suspended. Please contact the church office." },
-      { status: 403 }
-    );
-  }
-
-  const channel = identifier.includes("@") ? "EMAIL" : "SMS";
-  const contact = channel === "EMAIL" ? member.email! : member.phone;
-
-  const { devCode, delivered, deliveryError } = await issueOtp({
-    identifier: contact,
-    purpose: "MEMBER_LOGIN",
-    recipientType: "MEMBER",
-    recipientId: member.id,
-    channel,
-    displayName: member.fullName,
+  setPendingMemberAuth({
+    token: result.token,
+    tamashaUserId: result.user.id,
+    phoneNumber: result.user.phone_number,
   });
 
-  return NextResponse.json({ ok: true, identifier: contact, devCode, delivered, deliveryError });
+  // No devCode here - Tamasha really did send the OTP. `delivered: true`
+  // reflects that, matching how the existing verify page already reads it.
+  return NextResponse.json({ ok: true, identifier, delivered: true });
 }

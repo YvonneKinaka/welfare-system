@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { Wallet2 } from "lucide-react";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
@@ -240,6 +242,20 @@ export default function OrganizationSettingsPage() {
           {savedMsg && <span className="text-brand-600 text-sm font-semibold">{savedMsg}</span>}
         </div>
       </form>
+
+      <Card className="mt-6 flex items-center justify-between">
+        <div>
+          <h2 className="font-display text-xl font-semibold text-ink mb-1">Disbursements</h2>
+          <p className="text-sm text-body">
+            Wallet balance, approval settings, and releasing funds with multi-approver sign-off.
+          </p>
+        </div>
+        <Link href="/admin/settings/disbursements">
+          <Button variant="secondary">
+            <Wallet2 size={16} /> Open
+          </Button>
+        </Link>
+      </Card>
     </div>
   );
 }

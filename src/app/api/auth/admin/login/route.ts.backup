@@ -27,6 +27,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: 401 });
   }
 
+  // Defensive stop, not a guess: only triggers if Tamasha's response
+  // actually flags this. No UI exists yet to let someone pick an estate,
+  // and inventing that flow risks guessing at a shape we haven't seen.
+  if (result.estateSelectionRequired) {
+    return NextResponse.json(
+      {
+        error:
+          "This account has access to multiple estates and must choose one before continuing. This app doesn't support estate selection yet - share the accessible_estates response shape and this can be wired in next.",
+      },
+      { status: 501 }
+    );
+  }
+
   setPendingAdminAuth({
     token: result.token,
     tamashaUserId: result.user.id,
@@ -38,5 +51,3 @@ export async function POST(req: NextRequest) {
   // already knows how to show/hide its banners based on these two fields).
   return NextResponse.json({ ok: true, identifier: email, delivered: true });
 }
-
-

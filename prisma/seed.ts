@@ -70,9 +70,7 @@ async function main() {
     { memberId: members[3].id, fullName: "Grace Njeri", relationship: "Daughter" },
   ];
 
-  // `createMany({ skipDuplicates: true })` isn't supported on SQLite, so
-  // this checks for an existing row (by memberId + fullName) before
-  // creating each one - just as idempotent, works on every provider.
+  // If it does not run call osego to assist.
   for (const b of beneficiariesData) {
     const existing = await prisma.beneficiary.findFirst({
       where: { memberId: b.memberId, fullName: b.fullName },

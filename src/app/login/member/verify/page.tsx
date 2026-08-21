@@ -37,12 +37,13 @@ export default function MemberVerifyPage() {
   }
 
   async function onResend() {
-    // Reuses the existing member login endpoint - it already re-issues a
-    // fresh OTP for a given identifier, so no second OTP path is needed.
+    // Calls the dedicated resend endpoint (mirrors the admin flow) - it
+    // reuses the Tamasha user id/phone already captured at login, so it
+    // doesn't need the password again.
     setResending(true);
     setResendMsg("");
     setError("");
-    const res = await fetch("/api/auth/member/login", {
+    const res = await fetch("/api/auth/member/resend", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ identifier }),
@@ -67,7 +68,7 @@ export default function MemberVerifyPage() {
       <p className="text-sm font-semibold text-brand-600 uppercase tracking-wide mb-1">Member Login</p>
       <h1 className="font-display text-3xl font-semibold text-ink mb-1">Enter verification code</h1>
       <p className="text-body mb-6">
-        We sent a 6-digit code to <span className="font-semibold text-ink">{identifier}</span>.
+        We sent a 4-digit code to <span className="font-semibold text-ink">{identifier}</span>.
       </p>
 
       {devCode && (
@@ -88,11 +89,11 @@ export default function MemberVerifyPage() {
         <Input
           label="Verification Code"
           inputMode="numeric"
-          maxLength={6}
+          maxLength={4}
           required
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder="6-digit code"
+          placeholder="4-digit code"
         />
         {error && <p className="text-sm text-danger-text">{error}</p>}
         <Button type="submit" disabled={loading} className="w-full">

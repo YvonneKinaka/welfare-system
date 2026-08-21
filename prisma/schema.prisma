@@ -27,6 +27,10 @@ model Organization {
   admins   Admin[]
   members  Member[]
   settings OrganizationSettings?
+
+  wallet                       Wallet?
+  disbursementApprovalSettings DisbursementApprovalSettings?
+  disbursements                Disbursement[]
 }
 
 // Organization-wide payment configuration. Two independent models:
@@ -57,6 +61,84 @@ model OrganizationSettings {
   updatedAt DateTime @updatedAt
 }
 
+// Organization-wide fund ledger. Balance only ever moves through a
+// WalletDeposit (money in, recorded manually by an admin - there is no
+// automatic funding source yet) or a completed Disbursement (money out).
+model Wallet {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  balance        Int          @default(0)
+  totalReceived  Int          @default(0)
+  totalDisbursed Int          @default(0)
+  updatedAt      DateTime     @updatedAt
+
+  deposits      WalletDeposit[]
+  disbursements Disbursement[]
+}
+
+model WalletDeposit {
+  id           String   @id @default(cuid())
+  walletId     String
+  wallet       Wallet   @relation(fields: [walletId], references: [id])
+  amount       Int
+  note         String?
+  recordedById String?
+  createdAt    DateTime @default(now())
+}
+
+// Who must approve a disbursement before funds are released, and how many
+// of them are required. Approvers are plain email addresses - they have no
+// account and never log in, they only ever act through their one-time
+// approval link.
+model DisbursementApprovalSettings {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  approverEmails String // JSON string array of emails
+  minApprovals   Int          @default(1)
+  updatedAt      DateTime     @updatedAt
+}
+
+model Disbursement {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  walletId       String
+  wallet         Wallet       @relation(fields: [walletId], references: [id])
+  recipientName  String
+  amount         Int
+  paymentMethod  String // DisbursementMethod: BANK | MOBILE_MONEY
+  accountNumber  String // bank account number, or mobile money phone number
+  comment        String?
+  status         String       @default("PENDING") // DisbursementStatus: PENDING | APPROVED | REJECTED | COMPLETED
+  minApprovals   Int // snapshot of the setting at submission time
+  requestedById  String
+  requestedBy    Admin        @relation(fields: [requestedById], references: [id])
+  decidedAt      DateTime? // when it became APPROVED (funds released) or REJECTED
+  completedAt    DateTime? // when an admin confirmed the real-world payout was completed
+  createdAt      DateTime     @default(now())
+
+  approvals DisbursementApproval[]
+}
+
+// One row per configured approver per disbursement, each with its own
+// secret token so that approver can act with a single emailed link and no
+// login. Never re-usable for a different disbursement or approver.
+model DisbursementApproval {
+  id             String       @id @default(cuid())
+  disbursementId String
+  disbursement   Disbursement @relation(fields: [disbursementId], references: [id])
+  approverEmail  String
+  token          String       @unique
+  status         String       @default("PENDING") // ApprovalDecisionStatus: PENDING | APPROVED | REJECTED
+  comment        String?
+  respondedAt    DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@unique([disbursementId, approverEmail])
+}
+
 model Admin {
   id             String   @id @default(cuid())
   fullName       String
@@ -68,8 +150,9 @@ model Admin {
   organization   Organization? @relation(fields: [organizationId], references: [id])
   createdAt      DateTime @default(now())
 
-  contributionsRecorded Contribution[]
-  casesCreated          ContributionCase[]
+  contributionsRecorded  Contribution[]
+  casesCreated           ContributionCase[]
+  disbursementsRequested Disbursement[]
 }
 
 model Member {
@@ -82,6 +165,7 @@ model Member {
   missedCount      Int      @default(0)
   organizationId   String? // nullable for backward compatibility with pre-multi-org data
   organization     Organization? @relation(fields: [organizationId], references: [id])
+  tamashaUserId    Int?     @unique // Tamasha's user_id for this member's Welfare Member account, when linked
   dateJoined       DateTime @default(now())
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -172,17 +256,18 @@ model ContributionCase {
 
 // One row per eligible member per case - created when the case opens.
 model Contribution {
-  id           String           @id @default(cuid())
-  caseId       String
-  case         ContributionCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  memberId     String
-  member       Member           @relation(fields: [memberId], references: [id])
-  amount       Int              @default(300)
-  status       String           @default("PENDING") // PaymentStatus: PENDING | PAID | LAPSED | WAIVED
-  paidAt       DateTime?
-  recordedById String?
-  recordedBy   Admin?           @relation(fields: [recordedById], references: [id])
-  createdAt    DateTime         @default(now())
+  id             String           @id @default(cuid())
+  caseId         String
+  case           ContributionCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  memberId       String
+  member         Member           @relation(fields: [memberId], references: [id])
+  amount         Int              @default(300)
+  status         String           @default("PENDING") // PaymentStatus: PENDING | PAID | LAPSED | WAIVED
+  paidAt         DateTime?
+  recordedById   String?
+  recordedBy     Admin?           @relation(fields: [recordedById], references: [id])
+  reminderSentAt DateTime? // set once an upcoming-deadline reminder has gone out, so it's never repeated
+  createdAt      DateTime         @default(now())
 
   transactions PaymentTransaction[]
 
@@ -207,8 +292,8 @@ model OtpCode {
 // touching any calling code (see src/lib/notifications.ts).
 model Notification {
   id            String    @id @default(cuid())
-  recipientType String // RecipientType: ADMIN | MEMBER
-  recipientId   String
+  recipientType String // RecipientType: ADMIN | MEMBER | EXTERNAL
+  recipientId   String // for EXTERNAL, this is the recipient's email address (no account exists)
   channel       String // NotificationChannel: EMAIL | SMS
   type          String // e.g. "OTP", "CASE_OPENED", "DEADLINE_REMINDER", "SUSPENSION"
   payload       String // JSON string

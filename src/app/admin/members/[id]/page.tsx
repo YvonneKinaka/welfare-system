@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Download, FileText, Check, X } from "lucide-react";
 import Card from "@/components/ui/Card";
@@ -20,6 +20,7 @@ type MemberDetail = {
   email: string | null;
   status: string;
   missedCount: number;
+  tamashaUserId: number | null;
   beneficiaries: Beneficiary[];
   contributions: {
     id: string;
@@ -31,6 +32,9 @@ type MemberDetail = {
 
 export default function MemberDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const tamashaWarning = searchParams.get("tamashaWarning");
+  const tamashaJustLinked = searchParams.get("tamashaLinked") === "1";
   const [member, setMember] = useState<MemberDetail | null>(null);
   const [form, setForm] = useState({ fullName: "", phone: "", email: "" });
   const [savedMsg, setSavedMsg] = useState("");
@@ -113,6 +117,11 @@ export default function MemberDetailPage() {
           <p className="text-sm font-semibold text-brand-600 uppercase tracking-wide mb-1">Administrator</p>
           <h1 className="font-display text-3xl font-semibold text-ink">{member.fullName}</h1>
           <p className="text-body font-mono text-sm">{member.membershipNumber}</p>
+          <p className="text-body text-xs mt-0.5">
+            {member.tamashaUserId
+              ? `Tamasha User ID: ${member.tamashaUserId}`
+              : "Not linked to Tamasha"}
+          </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <Badge status={member.status} />
@@ -131,6 +140,17 @@ export default function MemberDetailPage() {
           </a>
         </div>
       </div>
+
+      {tamashaWarning && (
+        <div className="rounded-2xl border border-warning-border bg-warning-bg px-4 py-3 text-sm text-warning-text">
+          {tamashaWarning}
+        </div>
+      )}
+      {tamashaJustLinked && !tamashaWarning && (
+        <div className="rounded-2xl border border-success-border bg-success-bg px-4 py-3 text-sm text-success-text">
+          Member successfully linked to Tamasha.
+        </div>
+      )}
 
       {member.missedCount > 0 && (
         <div className="rounded-2xl border border-danger-border bg-danger-bg px-4 py-3 text-sm text-danger-text">

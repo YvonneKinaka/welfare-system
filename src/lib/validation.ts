@@ -7,17 +7,32 @@ export const adminLoginSchema = z.object({
 
 export const otpVerifySchema = z.object({
   identifier: z.string().min(1),
-  code: z.string().length(6, "Code must be 6 digits"),
+  // Tamasha's real otp_token is 4 digits. Inspection found this was still
+  // set to 6 (not yet actually changed, despite that being the intent) -
+  // fixed here since it's shared by both admin and member verification and
+  // would otherwise reject every real Tamasha code before it's even sent.
+  code: z.string().length(4, "Code must be 4 digits"),
 });
 
 export const memberLoginSchema = z.object({
   identifier: z.string().min(3, "Enter your registered phone number or email"),
+  // Tamasha's /login always requires a password - there is no passwordless
+  // option on their side, so this can't stay optional as it was locally.
+  password: z.string().min(1, "Password is required"),
+});
+
+export const resendMemberOtpSchema = z.object({
+  identifier: z.string().min(1),
 });
 
 export const createMemberSchema = z.object({
   fullName: z.string().min(2, "Full name is required"),
   phone: z.string().min(7, "Enter a valid phone number"),
   email: z.string().email().optional().or(z.literal("")),
+  // Optional: link an already-existing Tamasha welfare member (e.g. one
+  // created/tested directly in Tamasha/Postman) instead of creating a new
+  // one. Leave blank to have Church Welfare create it in Tamasha.
+  tamashaUserId: z.number().int().positive().optional(),
 });
 
 export const updateMemberSchema = z.object({
@@ -141,4 +156,36 @@ export const paymentCallbackSchema = z.object({
 // email+password step, does not require re-entering the password).
 export const resendAdminOtpSchema = z.object({
   identifier: z.string().email(),
+});
+
+// Admin: record money received into the organization's wallet.
+export const recordDepositSchema = z.object({
+  amount: z.number().int().positive("Amount must be greater than 0"),
+  note: z.string().optional(),
+});
+
+// Admin: configure who must approve disbursements, and how many of them.
+export const updateDisbursementApprovalSettingsSchema = z
+  .object({
+    approverEmails: z.array(z.string().email("Enter a valid email")).min(1, "Add at least one approver"),
+    minApprovals: z.number().int().min(1, "At least 1 approval is required"),
+  })
+  .refine((data) => data.minApprovals <= data.approverEmails.length, {
+    message: "Minimum approvals can't exceed the number of approvers",
+    path: ["minApprovals"],
+  });
+
+// Admin: submit a new disbursement for approval.
+export const createDisbursementSchema = z.object({
+  recipientName: z.string().min(2, "Recipient name is required"),
+  amount: z.number().int().positive("Amount must be greater than 0"),
+  paymentMethod: z.enum(["BANK", "MOBILE_MONEY"]),
+  accountNumber: z.string().min(3, "Enter a valid account or phone number"),
+  comment: z.string().optional(),
+});
+
+// Approver (no account): approve or reject via their one-time email link.
+export const disbursementApprovalDecisionSchema = z.object({
+  decision: z.enum(["APPROVED", "REJECTED"]),
+  comment: z.string().optional(),
 });

@@ -1,25 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tamashaResendOtp } from "@/lib/tamashaClient";
-import { getPendingAdminAuth } from "@/lib/auth";
-import { resendAdminOtpSchema } from "@/lib/validation";
+import { getPendingMemberAuth } from "@/lib/auth";
+import { resendMemberOtpSchema } from "@/lib/validation";
 
 /**
  * Resends the phone OTP via Tamasha's real /generate-new-otp, using the
- * Tamasha user id + phone number stashed at login time (see
- * setPendingAdminAuth in src/lib/auth.ts). This deliberately does not
- * re-check the password - the person already proved they know it to reach
- * the verification screen this button lives on. Not a second/local OTP
- * system: this calls the same organization API the initial login already
- * triggered a send from.
+ * Tamasha user id + phone number stashed at login time. Mirrors
+ * src/app/api/auth/admin/resend/route.ts exactly, but reads the separate
+ * member pending-auth cookie - the two flows never share state.
  */
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const parsed = resendAdminOtpSchema.safeParse(body);
+  const parsed = resendMemberOtpSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
   }
 
-  const pending = getPendingAdminAuth();
+  const pending = getPendingMemberAuth();
   if (!pending) {
     return NextResponse.json(
       { error: "Your login attempt expired. Please log in again." },
