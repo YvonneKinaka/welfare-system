@@ -6,4 +6,5 @@ dev.db-journal
 .env
 *.log
 .DS_Store
+AGENTS.md
 tsconfig.tsbuildinfo

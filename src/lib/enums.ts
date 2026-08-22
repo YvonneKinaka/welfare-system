@@ -101,6 +101,7 @@ export type OtpPurpose = (typeof OtpPurpose)[keyof typeof OtpPurpose];
 export const RecipientType = {
   ADMIN: "ADMIN",
   MEMBER: "MEMBER",
+  EXTERNAL: "EXTERNAL",
 } as const;
 export type RecipientType = (typeof RecipientType)[keyof typeof RecipientType];
 

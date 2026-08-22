@@ -154,3 +154,40 @@ export async function generateCaseReport(caseId: string): Promise<Buffer> {
   doc.end();
   return done;
 }
+
+export async function generateDisbursementReport(organizationId: string): Promise<Buffer> {
+  const disbursements = await prisma.disbursement.findMany({
+    where: { organizationId },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const doc = new PDFDocument({ margin: 50, size: "A4" });
+  const chunks: Buffer[] = [];
+  doc.on("data", (chunk) => chunks.push(chunk));
+  const done = new Promise<Buffer>((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
+
+  doc.fillColor(BRAND).fontSize(20).text("Church Welfare Fund");
+  doc.fillColor(INK).fontSize(11).text("Disbursement Report");
+  doc.moveDown(1);
+  doc.fontSize(9);
+  doc.text("Date", 50, doc.y);
+  doc.text("Recipient", 125, doc.y);
+  doc.text("Amount", 300, doc.y);
+  doc.text("Method", 380, doc.y);
+  doc.text("Status", 460, doc.y);
+  doc.moveDown(1);
+
+  for (const disbursement of disbursements) {
+    if (doc.y > 760) doc.addPage();
+    const y = doc.y;
+    doc.fillColor(INK).text(new Date(disbursement.createdAt).toLocaleDateString(), 50, y);
+    doc.text(disbursement.recipientName, 125, y, { width: 165 });
+    doc.text(`KSh ${disbursement.amount}`, 300, y);
+    doc.text(disbursement.paymentMethod, 380, y);
+    doc.text(disbursement.status, 460, y);
+    doc.moveDown(1.2);
+  }
+
+  doc.end();
+  return done;
+}

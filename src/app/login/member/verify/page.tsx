@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import AuthSplitLayout from "@/components/AuthSplitLayout";
 
-export default function MemberVerifyPage() {
+function MemberVerifyForm() {
   const router = useRouter();
   const params = useSearchParams();
   const identifier = params.get("identifier") ?? "";
@@ -119,5 +119,13 @@ export default function MemberVerifyPage() {
         {resendMsg && <p className="text-sm text-brand-600 text-center">{resendMsg}</p>}
       </form>
     </AuthSplitLayout>
+  );
+}
+
+export default function MemberVerifyPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#fbf7f0]" />}>
+      <MemberVerifyForm />
+    </Suspense>
   );
 }

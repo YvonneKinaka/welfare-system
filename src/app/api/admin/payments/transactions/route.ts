@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { tamashaListEstateTransactions } from "@/lib/tamashaClient";
+import { tamashaListEstateTransactions, tamashaListWelfareTransactions } from "@/lib/tamashaClient";
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
@@ -13,7 +13,10 @@ export async function GET() {
     );
   }
 
-  const result = await tamashaListEstateTransactions(session.externalToken, { records: 20 });
+  const type = new URL(req.url).searchParams.get("type");
+  const result = type === "mobile" || type === "bill"
+    ? await tamashaListWelfareTransactions(session.externalToken, type, { records: 50 })
+    : await tamashaListEstateTransactions(session.externalToken, { records: 20 });
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }

@@ -395,6 +395,10 @@ export type TamashaPaymentLinkResult =
   | { success: true; paymentUrl?: string; emailQueued?: boolean; smsQueued?: boolean }
   | { success: false; error: string };
 
+export type TamashaMemberPaymentLinkResult =
+  | { success: true; paymentUrl?: string }
+  | { success: false; error: string };
+
 export async function tamashaCreatePaymentLink(
   adminToken: string,
   opts: {
@@ -448,6 +452,59 @@ export async function tamashaCreatePaymentLink(
   };
 }
 
+/** Creates a payment link for the currently authenticated Welfare member. */
+export async function tamashaCreateMemberPaymentLink(
+  memberToken: string,
+  opts: {
+    tamashaUserId: number;
+    externalReference: string;
+    amount: number;
+    currency?: string;
+    description?: string;
+    expiresInDays?: number;
+  }
+): Promise<TamashaMemberPaymentLinkResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl()}welfare/payment-links/member`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${memberToken}`,
+      },
+      body: JSON.stringify({
+        estate_id: Number(tamashaEstateId()),
+        user_id: opts.tamashaUserId,
+        external_reference: opts.externalReference,
+        amount: opts.amount,
+        currency: opts.currency ?? "KES",
+        description: opts.description ?? "Church Welfare contribution",
+        expires_in_days: opts.expiresInDays ?? 30,
+      }),
+    });
+  } catch {
+    return { success: false, error: "Could not reach the organization's Tamasha service." };
+  }
+
+  let body: any;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok || body?.success === false) {
+    return { success: false, error: body?.message || body?.errors?.[0] || "Could not create the payment link." };
+  }
+
+  if (!body?.data?.payment_url) {
+    return { success: false, error: "Tamasha did not return a payment URL." };
+  }
+
+  return { success: true, paymentUrl: body.data.payment_url };
+}
+
 export type TamashaConfirmResult =
   | { success: true; status: "PENDING" | "PROCESSING" | "PAID" | "FAILED"; providerTransactionId?: string }
   | { success: false; error: string };
@@ -461,6 +518,10 @@ export async function tamashaConfirmPayment(
   adminToken: string,
   opts: { checkoutRequestId?: string; welfareReference: string }
 ): Promise<TamashaConfirmResult> {
+  if (!opts.checkoutRequestId) {
+    return { success: false, error: "Tamasha checkout has not started yet. Ask the member to submit their phone number first." };
+  }
+
   let response: Response;
   try {
     response = await fetch(`${apiUrl()}welfare/payments/confirm`, {
@@ -472,7 +533,7 @@ export async function tamashaConfirmPayment(
       },
       body: JSON.stringify({
         estate_id: Number(tamashaEstateId()),
-        checkout_request_id: opts.checkoutRequestId ?? "",
+        checkout_request_id: opts.checkoutRequestId,
         welfare_reference: opts.welfareReference,
       }),
     });
@@ -516,7 +577,7 @@ export async function tamashaListEstateTransactions(
 
   let response: Response;
   try {
-    response = await fetch(`${apiUrl()}estate-sasapay-transactions/?${params.toString()}`, {
+    response = await fetch(`${apiUrl()}estate-sasapay-transactions?${params.toString()}`, {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -537,6 +598,81 @@ export async function tamashaListEstateTransactions(
 
   if (!response.ok || body?.success === false) {
     return { success: false, error: body?.message || "Could not list estate transactions." };
+  }
+
+  return { success: true, transactions: body?.data ?? [] };
+}
+
+/** Finds a Welfare payment transaction so reconciliation can obtain its checkout ID. */
+export async function tamashaFindWelfareTransaction(
+  adminToken: string,
+  welfareReference: string,
+): Promise<{ success: true; transaction: TamashaEstateTransaction } | { success: false; error: string }> {
+  let response: Response;
+  try {
+    const params = new URLSearchParams({ estate_id: tamashaEstateId() });
+    response = await fetch(`${apiUrl()}welfare/payments/${encodeURIComponent(welfareReference)}?${params.toString()}`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${adminToken}`,
+        "guard-name": "estate",
+      },
+    });
+  } catch {
+    return { success: false, error: "Could not reach the organization's Tamasha service." };
+  }
+
+  let body: any;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok || body?.success === false || !body?.data) {
+    return { success: false, error: body?.message || "Tamasha has not recorded a checkout for this payment yet." };
+  }
+
+  return { success: true, transaction: body.data };
+}
+
+/** Lists Welfare-admin mobile/bill disbursement transactions using the new scoped permission. */
+export async function tamashaListWelfareTransactions(
+  adminToken: string,
+  type: "mobile" | "bill",
+  opts?: { records?: number; status?: string; search?: string },
+): Promise<{ success: true; transactions: TamashaEstateTransaction[] } | { success: false; error: string }> {
+  const params = new URLSearchParams({
+    estate_id: tamashaEstateId(),
+    records: String(opts?.records ?? 50),
+  });
+  if (opts?.status) params.set("status", opts.status);
+  if (opts?.search) params.set("s", opts.search);
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl()}estate-invoices/${type}?${params.toString()}`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${adminToken}`,
+        "guard-name": memberGuardName(),
+      },
+    });
+  } catch {
+    return { success: false, error: "Could not reach the organization's Tamasha service." };
+  }
+
+  let body: any;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok || body?.success === false) {
+    return { success: false, error: body?.message || body?.errors?.[0] || "Could not list Welfare transactions." };
   }
 
   return { success: true, transactions: body?.data ?? [] };

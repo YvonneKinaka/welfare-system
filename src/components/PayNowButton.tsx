@@ -13,11 +13,9 @@ type TransactionState = {
 } | null;
 
 /**
- * Members can no longer self-initiate a Tamasha payment - creating a real
- * payment link requires an admin-level Tamasha token (see the Phase 3
- * write-up). This now just looks up whether an admin has already sent one
- * and, if so, links straight to Tamasha's real hosted checkout page. It
- * never creates a transaction or claims a payment has succeeded itself.
+ * Members can create their own Tamasha-hosted payment link. This component
+ * opens that link, but never marks a payment successful locally; status is
+ * confirmed by the admin reconciliation flow.
  */
 export default function PayNowButton({
   targetType,

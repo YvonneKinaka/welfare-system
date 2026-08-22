@@ -8,7 +8,7 @@ export async function GET() {
   const member = await prisma.member.findUniqueOrThrow({ where: { id: session!.id } });
   const pdf = await generateMemberStatement(session!.id);
 
-  return new NextResponse(pdf, {
+  return new NextResponse(new Uint8Array(pdf), {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${member.membershipNumber}-statement.pdf"`,

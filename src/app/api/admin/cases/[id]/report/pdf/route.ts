@@ -10,7 +10,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (!c) return NextResponse.json({ error: "Case not found." }, { status: 404 });
 
   const pdf = await generateCaseReport(params.id);
-  return new NextResponse(pdf, {
+  return new NextResponse(new Uint8Array(pdf), {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${c.beneficiary.fullName.replace(/\s+/g, "-")}-case-report.pdf"`,

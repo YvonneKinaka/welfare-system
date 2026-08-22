@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { recordPayment as recordWelfareContributionPayment } from "@/lib/contributions";
 import { recordObligationPayment } from "@/lib/organizationBilling";
 import { dispatchNotification } from "@/lib/notifications";
-import { tamashaCreatePaymentLink, tamashaConfirmPayment } from "@/lib/tamashaClient";
+import { tamashaCreatePaymentLink, tamashaConfirmPayment, tamashaFindWelfareTransaction } from "@/lib/tamashaClient";
 
 /**
  * PAYMENT TRANSACTIONS
@@ -238,15 +238,39 @@ export async function sendPaymentLink(opts: {
  * whether the API request itself succeeded.
  */
 export async function reconcilePaymentTransaction(transactionId: string, adminToken: string) {
-  const transaction = await prisma.paymentTransaction.findUniqueOrThrow({ where: { id: transactionId } });
+  let transaction = await prisma.paymentTransaction.findUniqueOrThrow({ where: { id: transactionId } });
 
   // Already settled - idempotent, does not re-confirm or re-apply effects.
   if (transaction.status === "PAID" || transaction.status === "FAILED") {
     return transaction;
   }
 
+  // The checkout ID is generated only after the member submits their phone
+  // number on Tamasha's public payment page. Resolve it from Tamasha before
+  // calling the confirmation endpoint when it was not captured earlier.
+  if (!transaction.tamashaCheckoutRequestId) {
+    const lookup = await tamashaFindWelfareTransaction(adminToken, transaction.reference);
+    if (!lookup.success) throw new Error(lookup.error);
+
+    const row = lookup.transaction as Record<string, unknown>;
+    const checkoutRequestId = String(row.checkout_request_id ?? "");
+    if (!checkoutRequestId) throw new Error("Tamasha returned no checkout request ID for this payment.");
+
+    transaction = await prisma.paymentTransaction.update({
+      where: { id: transaction.id },
+      data: {
+        tamashaCheckoutRequestId: checkoutRequestId,
+        providerTransactionId:
+          transaction.providerTransactionId ?? (row.transaction_reference ? String(row.transaction_reference) : undefined),
+      },
+    });
+  }
+
+  const checkoutRequestId = transaction.tamashaCheckoutRequestId;
+  if (!checkoutRequestId) throw new Error("Tamasha checkout request ID is missing.");
+
   const result = await tamashaConfirmPayment(adminToken, {
-    checkoutRequestId: transaction.tamashaCheckoutRequestId ?? undefined,
+    checkoutRequestId,
     welfareReference: transaction.reference,
   });
 
@@ -259,7 +283,7 @@ export async function reconcilePaymentTransaction(transactionId: string, adminTo
     where: { id: transaction.id },
     data: {
       status: result.status,
-      providerTransactionId: result.providerTransactionId ?? transaction.providerTransactionId,
+      providerTransactionId: result.providerTransactionId ?? transaction.providerTransactionId ?? undefined,
       completedAt: isFinal ? new Date() : null,
     },
   });

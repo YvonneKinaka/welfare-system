@@ -7,7 +7,7 @@ export async function GET(_req: NextRequest, { params }: { params: { memberId: s
   if (!member) return NextResponse.json({ error: "Member not found." }, { status: 404 });
 
   const pdf = await generateMemberStatement(params.memberId);
-  return new NextResponse(pdf, {
+  return new NextResponse(new Uint8Array(pdf), {
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `attachment; filename="${member.membershipNumber}-statement.pdf"`,
