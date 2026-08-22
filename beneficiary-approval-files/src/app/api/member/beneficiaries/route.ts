@@ -12,8 +12,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
   }
 
-  // Status is never taken from the client - every member submission starts
-  // as PENDING_APPROVAL and only an admin can move it to ACTIVE/REJECTED.
+  
   const beneficiary = await prisma.beneficiary.create({
     data: {
       memberId: session!.id,
