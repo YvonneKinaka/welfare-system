@@ -1,12 +1,4 @@
-// Church Welfare Management System - Database Schema
-// Using SQLite for zero-config local development.
-// Swap the datasource to postgresql/mysql for production - models are portable.
-//
-// NOTE ON ENUMS: SQLite's Prisma connector does not support native `enum`
-// types (P1012). Every field that would otherwise be an enum is stored as a
-// plain String column holding one of a fixed set of values instead. Those
-// value sets are defined once in src/lib/enums.ts and used everywhere in the
-// app for type safety - the database itself just stores the string.
+
 
 generator client {
   provider = "prisma-client-js"
@@ -51,8 +43,8 @@ model Beneficiary {
   member       Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
   fullName     String
   relationship String
-  phone        String? // collected when a member self-submits a beneficiary
-  status       String   @default("ACTIVE") // BeneficiaryStatus: PENDING_APPROVAL | ACTIVE | REJECTED | ARCHIVED
+  phone        String? 
+  status       String   @default("ACTIVE") 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -65,9 +57,9 @@ model ContributionCase {
   beneficiary      Beneficiary @relation(fields: [beneficiaryId], references: [id])
   affectedMemberId String
   affectedMember   Member      @relation("AffectedMember", fields: [affectedMemberId], references: [id])
-  amountPerMember  Int         @default(300) // fixed contribution, KSh, never editable
+  amountPerMember  Int         @default(300) 
   deadline         DateTime
-  status           String      @default("OPEN") // CaseStatus: OPEN | CLOSED
+  status           String      @default("OPEN") 
   createdById      String
   createdBy        Admin       @relation(fields: [createdById], references: [id])
   createdAt        DateTime    @default(now())
@@ -85,7 +77,7 @@ model Contribution {
   memberId     String
   member       Member           @relation(fields: [memberId], references: [id])
   amount       Int              @default(300)
-  status       String           @default("PENDING") // PaymentStatus: PENDING | PAID | LAPSED | WAIVED
+  status       String           @default("PENDING") 
   paidAt       DateTime?
   recordedById String?
   recordedBy   Admin?           @relation(fields: [recordedById], references: [id])
@@ -97,7 +89,7 @@ model Contribution {
 model OtpCode {
   id         String   @id @default(cuid())
   identifier String // email or phone the code was issued to
-  purpose    String // OtpPurpose: ADMIN_LOGIN | MEMBER_LOGIN
+  purpose    String 
   codeHash   String
   expiresAt  DateTime
   consumed   Boolean  @default(false)
@@ -107,9 +99,7 @@ model OtpCode {
   @@index([identifier, purpose])
 }
 
-// Notification placeholders - no real SMS/Email provider wired up yet.
-// Swap ConsoleNotificationProvider for a real provider later without
-// touching any calling code (see src/lib/notifications.ts).
+
 model Notification {
   id            String    @id @default(cuid())
   recipientType String // RecipientType: ADMIN | MEMBER
