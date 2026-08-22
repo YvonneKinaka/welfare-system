@@ -4,6 +4,7 @@ const nextConfig = {
   experimental: {
     // Shared hosting may limit the number of child Node processes.
     cpus: 1,
+    workerThreads: true,
     serverComponentsExternalPackages: ["pdfkit"],
   },
 };
