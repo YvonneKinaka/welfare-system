@@ -4,13 +4,13 @@ import { setPendingAdminAuth } from "@/lib/auth";
 import { adminLoginSchema } from "@/lib/validation";
 
 /**
- * Tamasha is the ONLY authentication provider. This route no longer
- * requires a matching local Admin row to exist - that used to reject
- * valid Tamasha users outright, which was a duplicate/redundant local
- * auth check. The local Admin table still matters (see verify/route.ts)
- * for welfare-system data/authorization - which organization someone can
- * see, whether they're a SUPER_ADMIN/ORG_ADMIN - but it is no longer a
- * gate on whether login itself succeeds.
+ * Tamasha is the source of admin identity (password + OTP) - this is the
+ * intended architecture. The local Admin table still exists and still
+ * gates ContributionCase/Contribution/Disbursement/MemberObligation
+ * operations via foreign keys, but which local Admin row a given Tamasha
+ * account maps to is resolved in verify/route.ts
+ * (resolveLocalAdminForTamasha, src/lib/adminSync.ts) - never invented as
+ * a synthetic id here or anywhere else.
  */
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -21,22 +21,29 @@ export async function POST(req: NextRequest) {
 
   const { email, password } = parsed.data;
 
-  // Tamasha is the source of truth for the password check (Guard-Name: estate).
   const result = await tamashaLogin(email, password);
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: 401 });
+  }
+
+  if (result.estateSelectionRequired) {
+    return NextResponse.json(
+      {
+        error:
+          "This account has access to multiple estates and must choose one before continuing. This app doesn't support estate selection yet - share the accessible_estates response shape and this can be wired in next.",
+      },
+      { status: 501 }
+    );
   }
 
   setPendingAdminAuth({
     token: result.token,
     tamashaUserId: result.user.id,
     phoneNumber: result.user.phone_number,
+    email: result.user.email,
+    firstName: result.user.first_name,
+    lastName: result.user.last_name,
   });
 
-  // No devCode here - this isn't this app's own local OTP, Tamasha really
-  // did send it. `delivered: true` reflects that (the existing verify page
-  // already knows how to show/hide its banners based on these two fields).
   return NextResponse.json({ ok: true, identifier: email, delivered: true });
 }
-
-

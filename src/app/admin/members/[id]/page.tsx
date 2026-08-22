@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Download, FileText, Check, X } from "lucide-react";
+import { Download, FileText, Check, X, Send, RefreshCw } from "lucide-react";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
@@ -28,6 +28,13 @@ type MemberDetail = {
     status: string;
     case: { beneficiary: { fullName: string } };
   }[];
+  obligations: {
+    id: string;
+    type: string;
+    periodLabel: string | null;
+    amount: number;
+    status: string;
+  }[];
 };
 
 export default function MemberDetailPage() {
@@ -41,6 +48,9 @@ export default function MemberDetailPage() {
   const [newBeneficiary, setNewBeneficiary] = useState({ fullName: "", relationship: "" });
   const [error, setError] = useState("");
   const [actingId, setActingId] = useState<string | null>(null);
+  const [sendingLink, setSendingLink] = useState<string | null>(null);
+  const [checking, setChecking] = useState<string | null>(null);
+  const [obligationMsg, setObligationMsg] = useState<{ id: string; text: string } | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/admin/members/${id}`);
@@ -106,6 +116,37 @@ export default function MemberDetailPage() {
     });
     setActingId(null);
     load();
+  }
+
+  async function sendObligationLink(obligationId: string) {
+    setSendingLink(obligationId);
+    setObligationMsg(null);
+    const res = await fetch("/api/admin/payments/send-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetType: "OBLIGATION", targetId: obligationId }),
+    });
+    const result = await res.json();
+    setSendingLink(null);
+    setObligationMsg({ id: obligationId, text: res.ok ? "Payment link sent." : (result.error ?? "Could not send payment link.") });
+  }
+
+  async function checkObligationStatus(obligationId: string) {
+    setChecking(obligationId);
+    setObligationMsg(null);
+    const res = await fetch("/api/admin/payments/reconcile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetType: "OBLIGATION", targetId: obligationId }),
+    });
+    const result = await res.json();
+    setChecking(null);
+    if (res.ok) {
+      setObligationMsg({ id: obligationId, text: `Status: ${result.transaction?.status ?? "unknown"}` });
+      load();
+    } else {
+      setObligationMsg({ id: obligationId, text: result.error ?? "Could not check status." });
+    }
   }
 
   if (!member) return <p className="text-body">Loading…</p>;
@@ -243,6 +284,44 @@ export default function MemberDetailPage() {
                 <span className="font-mono text-sm text-body">KSh {c.amount}</span>
                 <Badge status={c.status} />
               </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <h2 className="font-display text-xl font-semibold text-ink mb-4">Registration & Contribution Obligations</h2>
+        <div className="grid sm:grid-cols-2 gap-3">
+          {member.obligations.length === 0 && <p className="text-body text-sm">No obligations recorded yet.</p>}
+          {member.obligations.map((o) => (
+            <div key={o.id} className={`rounded-2xl border p-4 ${contributionCardTone(o.status)}`}>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-ink font-medium">
+                  {o.type.replace(/_/g, " ")}
+                  {o.periodLabel ? ` · ${o.periodLabel}` : ""}
+                </p>
+                <Badge status={o.status} />
+              </div>
+              <p className="font-mono text-sm text-body mb-2">KSh {o.amount}</p>
+              {o.status !== "PAID" && (
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    variant="secondary"
+                    disabled={sendingLink === o.id}
+                    onClick={() => sendObligationLink(o.id)}
+                  >
+                    <Send size={14} /> {sendingLink === o.id ? "Sending…" : "Send Payment Link"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={checking === o.id}
+                    onClick={() => checkObligationStatus(o.id)}
+                  >
+                    <RefreshCw size={14} /> {checking === o.id ? "Checking…" : "Check Status"}
+                  </Button>
+                </div>
+              )}
+              {obligationMsg?.id === o.id && <p className="text-xs text-body mt-2">{obligationMsg.text}</p>}
             </div>
           ))}
         </div>

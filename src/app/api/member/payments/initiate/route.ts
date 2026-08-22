@@ -2,8 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { initiatePaymentSchema } from "@/lib/validation";
-import { initiatePayment } from "@/lib/payments";
+import { getLatestTransactionForTarget } from "@/lib/payments";
 
+/**
+ * Read-only lookup, not a payment action. Members can no longer
+ * self-initiate a Tamasha payment link (POST /welfare/payment-links/notify
+ * requires an admin-level Tamasha token, which members don't have) - see
+ * the Phase 3 write-up. This endpoint now just returns whatever real
+ * transaction/payment link an admin has already sent for this target, so
+ * PayNowButton can show it, without ever creating or faking one itself.
+ */
 export async function POST(req: NextRequest) {
   const session = await getSession();
   const body = await req.json();
@@ -12,10 +20,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
   }
 
-  const { targetType, targetId, phone } = parsed.data;
+  const { targetType, targetId } = parsed.data;
 
-  // Verify the target belongs to the calling member before creating a
-  // transaction against it.
+  // Verify the target belongs to the calling member before returning anything.
   if (targetType === "OBLIGATION") {
     const obligation = await prisma.memberObligation.findUnique({ where: { id: targetId } });
     if (!obligation || obligation.memberId !== session!.id) {
@@ -28,16 +35,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const member = await prisma.member.findUniqueOrThrow({ where: { id: session!.id } });
-
-  try {
-    const transaction = await initiatePayment({
-      targetType,
-      targetId,
-      phone: phone ?? member.phone,
-    });
-    return NextResponse.json({ transaction }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Could not initiate payment." }, { status: 400 });
-  }
+  const transaction = await getLatestTransactionForTarget({ targetType, targetId });
+  return NextResponse.json({ transaction });
 }

@@ -5,12 +5,9 @@ import { resendAdminOtpSchema } from "@/lib/validation";
 
 /**
  * Resends the phone OTP via Tamasha's real /generate-new-otp, using the
- * Tamasha user id + phone number stashed at login time (see
- * setPendingAdminAuth in src/lib/auth.ts). This deliberately does not
+ * Tamasha user id + phone number stashed at login time. Does not
  * re-check the password - the person already proved they know it to reach
- * the verification screen this button lives on. Not a second/local OTP
- * system: this calls the same organization API the initial login already
- * triggered a send from.
+ * the verification screen this button lives on.
  */
 export async function POST(req: NextRequest) {
   const body = await req.json();

@@ -33,7 +33,7 @@ export default function AdminVerifyPage() {
       setError(data.error ?? "Something went wrong.");
       return;
     }
-    router.push(data.adminRole === "SUPER_ADMIN" ? "/super-admin/dashboard" : "/admin/dashboard");
+    router.push("/admin/dashboard");
   }
 
   async function onResend() {
@@ -65,7 +65,7 @@ export default function AdminVerifyPage() {
       <p className="text-sm font-semibold text-brand-600 uppercase tracking-wide mb-1">Admin Login</p>
       <h1 className="font-display text-3xl font-semibold text-ink mb-1">Verify your email</h1>
       <p className="text-body mb-6">
-        We sent a 6-digit code to <span className="font-semibold text-ink">{identifier}</span>.
+        We sent a 4-digit code to <span className="font-semibold text-ink">{identifier}</span>.
       </p>
 
       {devCode && (
@@ -86,11 +86,11 @@ export default function AdminVerifyPage() {
         <Input
           label="Email Verification Code"
           inputMode="numeric"
-          maxLength={6}
+          maxLength={4}
           required
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder="6-digit code"
+          placeholder="4-digit code"
         />
         {error && <p className="text-sm text-danger-text">{error}</p>}
         <Button type="submit" disabled={loading} className="w-full">

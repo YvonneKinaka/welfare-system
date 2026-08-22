@@ -105,6 +105,23 @@ function apiUrl(): string {
   return base.endsWith("/") ? base : `${base}/`;
 }
 
+/**
+ * Normalizes a phone number to the +254XXXXXXXXX format before it's sent
+ * to Tamasha. The Church Welfare admin form places no format constraint
+ * on this field (accepts spaces, dashes, a leading 0, with or without a
+ * country code) - Tamasha's account-creation call tolerates that loosely
+ * and still succeeds, but the welcome SMS/email dispatch that's supposed
+ * to follow does not, and silently doesn't fire. This is what was causing
+ * "member created, but no welcome message" - the record's phone_number
+ * simply wasn't in a dispatchable format.
+ */
+function normalizeKenyanPhone(input: string): string {
+  const digits = input.replace(/\D/g, "");
+  if (digits.startsWith("254")) return `+${digits}`;
+  if (digits.startsWith("0")) return `+254${digits.slice(1)}`;
+  return `+254${digits}`;
+}
+
 function guardName(): string {
   return process.env.TAMASHA_GUARD_NAME || "estate";
 }
@@ -307,7 +324,7 @@ export async function tamashaCreateWelfareMember(
         first_name: member.firstName,
         last_name: member.lastName,
         email: member.email,
-        phone_number: member.phoneNumber,
+        phone_number: normalizeKenyanPhone(member.phoneNumber),
         password,
         password_confirmation: password,
       }),
@@ -323,12 +340,277 @@ export async function tamashaCreateWelfareMember(
     body = null;
   }
 
-  if (!response.ok || body?.success === false || !body?.data?.user_id) {
+  if (!response.ok || body?.success === false || !body?.data?.id) {
+    // Laravel-style validation responses put the generic wrapper text in
+    // `message` and the actual field-level detail in `errors` (an object
+    // of field -> message array). We were only ever showing the generic
+    // wrapper - this surfaces the real detail instead, so a failure like
+    // "phone_number: The phone number format is invalid." is visible
+    // instead of just "Please fix all the errors before proceeding."
+    let detail: string | undefined;
+    if (body?.errors && typeof body.errors === "object") {
+      detail = Object.entries(body.errors)
+        .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(", ") : messages}`)
+        .join(" | ");
+    }
+
+    console.error("[Tamasha] POST welfare/members failed:", JSON.stringify(body));
+
     return {
       success: false,
-      error: body?.message || body?.errors?.[0] || "Could not create the member in Tamasha.",
+      error: detail || body?.message || "Could not create the member in Tamasha.",
     };
   }
 
-  return { success: true, tamashaUserId: body.data.user_id };
+  return { success: true, tamashaUserId: body.data.id };
+}
+
+/**
+ * PAYMENT LINKS + RECONCILIATION (Phase 3)
+ * ------------------------------------------
+ * Confirmed from TAMASHA_WELFARE_IMPLEMENTATION.md + the "Tamasha Church
+ * Welfare - Live" collection. All three calls use the *admin's own*
+ * Tamasha bearer token (session.externalToken), the same pattern as
+ * tamashaCreateWelfareMember above - never a separate stored credential.
+ *
+ *   POST {TAMASHA_API_URL}welfare/payment-links/notify
+ *     Headers: Authorization: Bearer <admin token>, Content-Type: application/json
+ *     Body:    { estate_id, user_id, external_reference, amount, currency,
+ *                description, expires_in_days }
+ *     Success: { success: true, data: { payment_url, email_queued, sms_queued } }
+ *
+ *   POST {TAMASHA_API_URL}welfare/payments/confirm
+ *     Headers: Authorization: Bearer <admin token>, Content-Type: application/json
+ *     Body:    { estate_id, checkout_request_id, welfare_reference }
+ *     Success: { success: true, data: { status, provider_transaction_id } }
+ *     `status` is the ONLY thing allowed to mark a payment PAID - never the
+ *     success of the notify call above.
+ *
+ *   GET {TAMASHA_API_URL}estate-sasapay-transactions/?estate_id=&records=&status=&from_date=&to_date=&s=
+ *     Headers: Authorization: Bearer <admin token>, guard-name: estate
+ *     Used for manual reconciliation/review, not automatic status changes.
+ */
+
+export type TamashaPaymentLinkResult =
+  | { success: true; paymentUrl?: string; emailQueued?: boolean; smsQueued?: boolean }
+  | { success: false; error: string };
+
+export async function tamashaCreatePaymentLink(
+  adminToken: string,
+  opts: {
+    tamashaUserId: number;
+    externalReference: string;
+    amount: number;
+    currency?: string;
+    description?: string;
+    expiresInDays?: number;
+  }
+): Promise<TamashaPaymentLinkResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl()}welfare/payment-links/notify`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({
+        estate_id: Number(tamashaEstateId()),
+        user_id: opts.tamashaUserId,
+        external_reference: opts.externalReference,
+        amount: opts.amount,
+        currency: opts.currency ?? "KES",
+        description: opts.description ?? "Church Welfare contribution",
+        expires_in_days: opts.expiresInDays ?? 30,
+      }),
+    });
+  } catch {
+    return { success: false, error: "Could not reach the organization's Tamasha service." };
+  }
+
+  let body: any;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok || body?.success === false) {
+    return { success: false, error: body?.message || body?.errors?.[0] || "Could not create the payment link." };
+  }
+
+  return {
+    success: true,
+    paymentUrl: body?.data?.payment_url,
+    emailQueued: body?.data?.email_queued,
+    smsQueued: body?.data?.sms_queued,
+  };
+}
+
+export type TamashaConfirmResult =
+  | { success: true; status: "PENDING" | "PROCESSING" | "PAID" | "FAILED"; providerTransactionId?: string }
+  | { success: false; error: string };
+
+/**
+ * The ONLY function in this app allowed to report a real PAID/FAILED
+ * outcome for a Tamasha payment. See src/lib/payments.ts -
+ * reconcilePaymentTransaction() is the only caller.
+ */
+export async function tamashaConfirmPayment(
+  adminToken: string,
+  opts: { checkoutRequestId?: string; welfareReference: string }
+): Promise<TamashaConfirmResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl()}welfare/payments/confirm`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({
+        estate_id: Number(tamashaEstateId()),
+        checkout_request_id: opts.checkoutRequestId ?? "",
+        welfare_reference: opts.welfareReference,
+      }),
+    });
+  } catch {
+    return { success: false, error: "Could not reach the organization's Tamasha service." };
+  }
+
+  let body: any;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok || body?.success === false || !body?.data?.status) {
+    return { success: false, error: body?.message || body?.errors?.[0] || "Could not confirm payment status." };
+  }
+
+  return {
+    success: true,
+    status: body.data.status,
+    providerTransactionId: body.data.provider_transaction_id,
+  };
+}
+
+export type TamashaEstateTransaction = Record<string, unknown>;
+
+/** Manual reconciliation aid - lists estate transactions from Tamasha. Never used to auto-mark anything PAID. */
+export async function tamashaListEstateTransactions(
+  adminToken: string,
+  opts?: { records?: number; status?: string; fromDate?: string; toDate?: string; search?: string }
+): Promise<{ success: true; transactions: TamashaEstateTransaction[] } | { success: false; error: string }> {
+  const params = new URLSearchParams({
+    estate_id: tamashaEstateId(),
+    records: String(opts?.records ?? 20),
+    status: opts?.status ?? "",
+    from_date: opts?.fromDate ?? "",
+    to_date: opts?.toDate ?? "",
+    s: opts?.search ?? "",
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl()}estate-sasapay-transactions/?${params.toString()}`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${adminToken}`,
+        "guard-name": "estate",
+      },
+    });
+  } catch {
+    return { success: false, error: "Could not reach the organization's Tamasha service." };
+  }
+
+  let body: any;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok || body?.success === false) {
+    return { success: false, error: body?.message || "Could not list estate transactions." };
+  }
+
+  return { success: true, transactions: body?.data ?? [] };
+}
+
+/**
+ * WELFARE ADMIN CREATION (POST /welfare/admins)
+ * -----------------------------------------------
+ * Solves the bootstrap/chicken-and-egg problem: creating the *first*
+ * Tamasha estate admin account, before any admin token exists to log in
+ * with. Given directly by the engineer (not found in the earlier Postman
+ * collections):
+ *
+ *   POST {TAMASHA_API_URL}welfare/admins
+ *     Body: { estate_id, first_name, last_name, email, phone_number,
+ *              password, password_confirmation }
+ *
+ * ASSUMPTION FLAGGED (no auth requirement was specified for this one):
+ * called here WITHOUT an Authorization header by default, since this is
+ * specifically for bootstrapping the first admin - there may be no valid
+ * admin token available yet. `adminToken` is accepted as an optional
+ * param in case testing shows this endpoint actually requires one; if a
+ * 401 comes back, that's the signal to pass one.
+ */
+export type TamashaCreateAdminResult =
+  | { success: true; tamashaUserId?: number }
+  | { success: false; error: string };
+
+export async function tamashaCreateWelfareAdmin(admin: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phoneNumber: string;
+  password: string;
+  adminToken?: string;
+}): Promise<TamashaCreateAdminResult> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  if (admin.adminToken) headers.Authorization = `Bearer ${admin.adminToken}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiUrl()}welfare/admins`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        estate_id: Number(tamashaEstateId()),
+        first_name: admin.firstName,
+        last_name: admin.lastName,
+        email: admin.email,
+        phone_number: normalizeKenyanPhone(admin.phoneNumber),
+        password: admin.password,
+        password_confirmation: admin.password,
+      }),
+    });
+  } catch {
+    return { success: false, error: "Could not reach the organization's Tamasha service." };
+  }
+
+  let body: any;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+
+  if (!response.ok || body?.success === false) {
+    return {
+      success: false,
+      error: body?.message || body?.errors?.[0] || "Could not create the admin in Tamasha.",
+    };
+  }
+
+  return { success: true, tamashaUserId: body?.data?.user_id };
 }

@@ -148,6 +148,7 @@ model Admin {
   status         String   @default("ACTIVE") // AdminStatus: ACTIVE | SUSPENDED
   organizationId String? // null for SUPER_ADMIN; required in practice for ORG_ADMIN
   organization   Organization? @relation(fields: [organizationId], references: [id])
+  tamashaUserId  Int?     @unique // Tamasha's user_id for this admin's estate-guard account, when linked
   createdAt      DateTime @default(now())
 
   contributionsRecorded  Contribution[]
@@ -212,6 +213,8 @@ model PaymentTransaction {
   phone                 String
   status                String    @default("PENDING") // PaymentTransactionStatus: PENDING | PROCESSING | PAID | FAILED
   providerTransactionId String? // populated once a real provider callback exists
+  tamashaPaymentUrl         String? // the Tamasha-hosted checkout link sent to the member
+  tamashaCheckoutRequestId  String? // Tamasha's checkout_request_id, once the member starts paying
 
   obligationId   String?
   obligation     MemberObligation? @relation(fields: [obligationId], references: [id])

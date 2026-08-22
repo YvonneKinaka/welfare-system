@@ -7,10 +7,8 @@ export const adminLoginSchema = z.object({
 
 export const otpVerifySchema = z.object({
   identifier: z.string().min(1),
-  // Tamasha's real otp_token is 4 digits. Inspection found this was still
-  // set to 6 (not yet actually changed, despite that being the intent) -
-  // fixed here since it's shared by both admin and member verification and
-  // would otherwise reject every real Tamasha code before it's even sent.
+  // Tamasha's real otp_token is 4 digits - shared by both admin and
+  // member verification, since both are Tamasha-authenticated.
   code: z.string().length(4, "Code must be 4 digits"),
 });
 
@@ -95,6 +93,7 @@ export const createOrganizationSchema = z.object({
 export const createOrgAdminSchema = z.object({
   fullName: z.string().min(2, "Full name is required"),
   email: z.string().email("Enter a valid email"),
+  phoneNumber: z.string().min(7, "Enter a valid phone number"),
   password: z.string().min(8, "Password must be at least 8 characters"),
   organizationId: z.string().min(1, "Select an organization"),
 });
@@ -189,3 +188,16 @@ export const disbursementApprovalDecisionSchema = z.object({
   decision: z.enum(["APPROVED", "REJECTED"]),
   comment: z.string().optional(),
 });
+
+// Admin: reconcile a payment transaction's real status via Tamasha.
+// Accepts either a known transactionId, or a target (looks up the latest
+// transaction for it) - the UI naturally has the target at hand.
+export const reconcilePaymentSchema = z
+  .object({
+    transactionId: z.string().min(1).optional(),
+    targetType: z.enum(["OBLIGATION", "WELFARE_CONTRIBUTION"]).optional(),
+    targetId: z.string().min(1).optional(),
+  })
+  .refine((data) => data.transactionId || (data.targetType && data.targetId), {
+    message: "Provide either transactionId or targetType+targetId",
+  });

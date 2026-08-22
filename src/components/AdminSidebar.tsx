@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Home, LayoutDashboard, Users, Heart, Layers, FileText, LogOut, ClipboardCheck, Settings } from "lucide-react";
+import { Home, LayoutDashboard, Users, Heart, Layers, FileText, LogOut, ClipboardCheck, Settings, Receipt } from "lucide-react";
 
 const links = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -10,6 +10,7 @@ const links = [
   { href: "/admin/beneficiaries", label: "Beneficiaries", icon: Heart },
   { href: "/admin/beneficiary-approvals", label: "Beneficiary Approvals", icon: ClipboardCheck },
   { href: "/admin/cases", label: "Contribution Cases", icon: Layers },
+  { href: "/admin/payments/transactions", label: "Tamasha Transactions", icon: Receipt },
   { href: "/admin/reports", label: "Reports", icon: FileText },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];

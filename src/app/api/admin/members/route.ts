@@ -60,17 +60,38 @@ export async function POST(req: NextRequest) {
   }
 
   const organizationId = session?.organizationId ?? null;
-  const membershipNumber = await generateMembershipNumber(organizationId);
-  const member = await prisma.member.create({
-    data: {
-      fullName,
-      phone,
-      email: email || null,
-      membershipNumber,
-      organizationId,
-      tamashaUserId: tamashaUserId ?? null,
-    },
-  });
+
+  let member;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const membershipNumber = await generateMembershipNumber(organizationId);
+    try {
+      member = await prisma.member.create({
+        data: {
+          fullName,
+          phone,
+          email: email || null,
+          membershipNumber,
+          organizationId,
+          tamashaUserId: tamashaUserId ?? null,
+        },
+      });
+      break;
+    } catch (err) {
+      // P2002 = unique constraint violation. Only retry if it's specifically
+      // the membership number (a true race with another concurrent create);
+      // any other unique violation (phone/email/tamashaUserId) is a real
+      // conflict and should surface immediately, not be retried.
+      const isMembershipNumberClash =
+        err instanceof Error &&
+        "code" in err &&
+        (err as { code?: string }).code === "P2002" &&
+        JSON.stringify((err as { meta?: unknown }).meta ?? "").includes("membershipNumber");
+      if (!isMembershipNumberClash || attempt === 2) throw err;
+    }
+  }
+  if (!member) {
+    return NextResponse.json({ error: "Could not generate a unique membership number." }, { status: 500 });
+  }
 
   // Case 2: admin explicitly linked an already-existing Tamasha member.
   if (tamashaUserId) {

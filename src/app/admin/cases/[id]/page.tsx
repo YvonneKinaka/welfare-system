@@ -2,14 +2,14 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Download } from "lucide-react";
+import { Download, Send, RefreshCw } from "lucide-react";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import ProgressBar from "@/components/ui/ProgressBar";
 import { contributionCardTone } from "@/lib/cardTone";
 
-type MemberLite = { id: string; fullName: string; membershipNumber: string };
+type MemberLite = { id: string; fullName: string; membershipNumber: string; contributionId: string };
 type Progress = {
   case: {
     id: string;
@@ -33,6 +33,9 @@ export default function CaseDetailPage() {
   const router = useRouter();
   const [data, setData] = useState<Progress | null>(null);
   const [recording, setRecording] = useState<string | null>(null);
+  const [sendingLink, setSendingLink] = useState<string | null>(null);
+  const [checking, setChecking] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<{ contributionId: string; text: string } | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/admin/cases/${id}`);
@@ -53,6 +56,40 @@ export default function CaseDetailPage() {
     });
     setRecording(null);
     load();
+  }
+
+  async function sendLink(contributionId: string) {
+    setSendingLink(contributionId);
+    setActionMsg(null);
+    const res = await fetch("/api/admin/payments/send-link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetType: "WELFARE_CONTRIBUTION", targetId: contributionId }),
+    });
+    const result = await res.json();
+    setSendingLink(null);
+    setActionMsg({
+      contributionId,
+      text: res.ok ? "Payment link sent." : (result.error ?? "Could not send payment link."),
+    });
+  }
+
+  async function checkStatus(contributionId: string) {
+    setChecking(contributionId);
+    setActionMsg(null);
+    const res = await fetch("/api/admin/payments/reconcile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetType: "WELFARE_CONTRIBUTION", targetId: contributionId }),
+    });
+    const result = await res.json();
+    setChecking(null);
+    if (res.ok) {
+      setActionMsg({ contributionId, text: `Status: ${result.transaction?.status ?? "unknown"}` });
+      load();
+    } else {
+      setActionMsg({ contributionId, text: result.error ?? "Could not check status." });
+    }
   }
 
   async function closeCase() {
@@ -135,24 +172,43 @@ export default function CaseDetailPage() {
           {cards.map((m) => (
             <div
               key={m.id}
-              className={`rounded-2xl border p-4 flex items-center justify-between ${contributionCardTone(m.status)}`}
+              className={`rounded-2xl border p-4 ${contributionCardTone(m.status)}`}
             >
-              <div>
-                <p className="font-semibold text-ink">{m.fullName}</p>
-                <p className="text-xs text-body font-mono">{m.membershipNumber}</p>
-              </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold text-ink">{m.fullName}</p>
+                  <p className="text-xs text-body font-mono">{m.membershipNumber}</p>
+                </div>
                 <Badge status={m.status} label={m.status === "PAID" ? "Paid" : "Pending"} />
-                {m.status !== "PAID" && (
+              </div>
+              {m.status !== "PAID" && (
+                <div className="flex gap-2 mt-3 flex-wrap">
                   <Button
                     variant="secondary"
                     disabled={recording === m.id || c.status === "CLOSED"}
                     onClick={() => recordPayment(m.id)}
                   >
-                    {recording === m.id ? "Recording…" : "Record"}
+                    {recording === m.id ? "Recording…" : "Record Manually"}
                   </Button>
-                )}
-              </div>
+                  <Button
+                    variant="secondary"
+                    disabled={sendingLink === m.contributionId || c.status === "CLOSED"}
+                    onClick={() => sendLink(m.contributionId)}
+                  >
+                    <Send size={14} /> {sendingLink === m.contributionId ? "Sending…" : "Send Payment Link"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    disabled={checking === m.contributionId}
+                    onClick={() => checkStatus(m.contributionId)}
+                  >
+                    <RefreshCw size={14} /> {checking === m.contributionId ? "Checking…" : "Check Status"}
+                  </Button>
+                </div>
+              )}
+              {actionMsg?.contributionId === m.contributionId && (
+                <p className="text-xs text-body mt-2">{actionMsg.text}</p>
+              )}
             </div>
           ))}
           {cards.length === 0 && (

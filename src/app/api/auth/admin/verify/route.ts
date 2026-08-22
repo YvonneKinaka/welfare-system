@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { tamashaVerifyOtp } from "@/lib/tamashaClient";
 import { getPendingAdminAuth, clearPendingAdminAuth, createSession } from "@/lib/auth";
+import { resolveLocalAdminForTamasha } from "@/lib/adminSync";
 import { otpVerifySchema } from "@/lib/validation";
 
 /**
- * Authentication is fully decided by Tamasha (password + OTP) above this
- * point. The local Admin lookup below is authorization enrichment only -
- * it decides which organization/role this person has *within the welfare
- * system*, not whether they're allowed to log in at all. A Tamasha user
- * with no matching local Admin row still gets a valid session; they just
- * won't have organization-scoped access until a super admin links them.
+ * Authentication (password + OTP) is fully decided by Tamasha above this
+ * point. session.id is always a real local Admin.id, resolved or
+ * auto-created by resolveLocalAdminForTamasha - never a synthetic string
+ * like "tamasha-524". This is what fixes the ContributionCase/
+ * Contribution/Disbursement/MemberObligation foreign key violations.
  */
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -34,39 +33,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: result.error }, { status: 401 });
   }
 
-  // Non-blocking: this only enriches the session with welfare-system
-  // organization/role context, when a link already exists.
-  const admin = await prisma.admin.findUnique({ where: { email: identifier } });
+  const admin = await resolveLocalAdminForTamasha({
+    tamashaUserId: pending.tamashaUserId,
+    email: pending.email,
+    fullName: `${pending.firstName} ${pending.lastName}`.trim(),
+  });
 
-  if (admin?.status === "SUSPENDED") {
+  if (admin.status === "SUSPENDED") {
     return NextResponse.json(
-      { error: "This admin account has been suspended. Contact your super admin." },
+      { error: "This admin account has been suspended. Contact the church office." },
       { status: 403 }
     );
   }
 
   clearPendingAdminAuth();
-
-  if (admin) {
-    await createSession({
-      role: "ADMIN",
-      id: admin.id,
-      name: admin.fullName,
-      adminRole: admin.role as "SUPER_ADMIN" | "ORG_ADMIN",
-      organizationId: admin.organizationId,
-      externalToken: pending.token,
-    });
-    return NextResponse.json({ ok: true, adminRole: admin.role });
-  }
-
-  // Authenticated via Tamasha, but not yet linked to a local Admin record.
-  // "tamasha-" prefix guarantees this id can never collide with a real
-  // local Admin cuid.
   await createSession({
     role: "ADMIN",
-    id: `tamasha-${pending.tamashaUserId}`,
-    name: identifier,
+    id: admin.id,
+    name: admin.fullName,
+    adminRole: admin.role as "SUPER_ADMIN" | "ORG_ADMIN",
+    organizationId: admin.organizationId,
     externalToken: pending.token,
   });
-  return NextResponse.json({ ok: true, adminRole: undefined, unprovisioned: true });
+
+  return NextResponse.json({ ok: true, adminRole: admin.role });
 }

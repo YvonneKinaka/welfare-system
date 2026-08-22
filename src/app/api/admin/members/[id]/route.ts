@@ -10,6 +10,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     include: {
       beneficiaries: true,
       contributions: { include: { case: { include: { beneficiary: true } } } },
+      obligations: { orderBy: { createdAt: "desc" } },
     },
   });
   if (!member) return NextResponse.json({ error: "Member not found." }, { status: 404 });

@@ -56,8 +56,11 @@ const PENDING_ADMIN_AUTH_COOKIE = "cwms_pending_admin_auth";
 
 export type PendingAdminAuth = {
   token: string; // Tamasha JWT from /login
-  tamashaUserId: number; // needed by Tamasha's /generate-new-otp (resend)
+  tamashaUserId: number; // needed by Tamasha's /generate-new-otp (resend), and to map to a local Admin
   phoneNumber?: string; // needed by Tamasha's /generate-new-otp (resend)
+  email: string; // needed to resolve/create the matching local Admin
+  firstName: string; // needed only if a local Admin must be auto-created
+  lastName: string; // needed only if a local Admin must be auto-created
 };
 
 /**
